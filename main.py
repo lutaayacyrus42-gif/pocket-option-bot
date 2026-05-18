@@ -22,7 +22,7 @@ print(Fore.CYAN + "===================================")
 # SETTINGS
 # ====================================
 
-API_KEY = "1fc436c171bb47b2b714a9f4c1fe45a"
+API_KEY = "1fc436c171bb47b2b714a9f4c1fe45a7"
 
 TRADE_DURATION = 5
 MIN_CONFIDENCE = 80
