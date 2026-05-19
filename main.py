@@ -1,373 +1,315 @@
 import requests
 import pandas as pd
-from ta.trend import EMAIndicator
-from colorama import Fore, init
-from datetime import datetime, timedelta
+import numpy as np
 import time
-
-# ====================================
-# STARTUP
-# ====================================
+from ta.trend import EMAIndicator, SMAIndicator
+from datetime import datetime
+from colorama import Fore, init
 
 init(autoreset=True)
 
-print(Fore.CYAN + "===================================")
-print(Fore.CYAN + " POCKET OPTION AI SIGNAL BOT ")
-print(Fore.CYAN + " SMC + SUPPLY DEMAND STRATEGY ")
-print(Fore.CYAN + " DISCORD ALERTS ENABLED ")
-print(Fore.CYAN + " 5 MINUTE SYSTEM ")
-print(Fore.CYAN + "===================================")
+# ==============================
+# CONFIG
+# ==============================
 
-# ====================================
-# SETTINGS
-# ====================================
+API_KEY = "YOUR_FINNHUB_OR_TWELVEDATA_KEY"
 
-API_KEY = "1fc436c171bb47b2b714a9f4c1fe45a7"
+DISCORD_WEBHOOK = "YOUR_DISCORD_WEBHOOK"
 
-TRADE_DURATION = 5
-MIN_CONFIDENCE = 80
+PAIRS = [
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "AUD/USD",
+    "USD/CAD",
+    "EUR/JPY"
+]
 
-# ====================================
-# DISCORD WEBHOOK
-# ====================================
+TIMEFRAME = "5min"
 
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504374915657371759/Zsv5wpigIJcYQTYaSILn8LRcPaw3T14IFEXGeKsBHd_ZEFiZIUAus2bbFtarO1xN0TVN"
-
-# ====================================
-# FOREX PAIRS
-# ====================================
-
-PAIRS = {
-
-    ("EUR", "USD"): "EUR/USD",
-    ("GBP", "USD"): "GBP/USD",
-    ("USD", "JPY"): "USD/JPY",
-    ("AUD", "USD"): "AUD/USD"
-}
-
-# ====================================
-# SEND DISCORD ALERT
-# ====================================
+# ==============================
+# DISCORD ALERT
+# ==============================
 
 def send_discord(message):
-
     try:
-
         data = {
             "content": message
         }
 
-        requests.post(
-            DISCORD_WEBHOOK,
-            json=data
-        )
+        requests.post(DISCORD_WEBHOOK, json=data)
 
     except Exception as e:
+        print(Fore.RED + f"Discord Error: {e}")
 
-        print(f"Discord Error: {e}")
+# ==============================
+# GET FOREX DATA
+# ==============================
 
-# ====================================
-# GET MARKET DATA
-# ====================================
+def get_data(symbol, interval="5min", outputsize=200):
 
-def get_data(from_symbol, to_symbol):
+    pair = symbol.replace("/", "")
+
+    url = (
+        f"https://api.twelvedata.com/time_series?"
+        f"symbol={pair}"
+        f"&interval={interval}"
+        f"&outputsize={outputsize}"
+        f"&apikey={API_KEY}"
+    )
 
     try:
-
-        symbol = f"{from_symbol}/{to_symbol}"
-
-        url = (
-            f"https://api.twelvedata.com/time_series?"
-            f"symbol={symbol}"
-            f"&interval=1min"
-            f"&outputsize=100"
-            f"&apikey={API_KEY}"
-        )
-
         response = requests.get(url)
-
         data = response.json()
 
         if "values" not in data:
-
-            print(Fore.RED + f"❌ API ERROR: {data}")
+            print(Fore.RED + f"NO DATA: {symbol}")
             return None
 
-        rows = []
+        df = pd.DataFrame(data["values"])
 
-        for candle in data["values"]:
+        df = df.iloc[::-1]
 
-            rows.append({
-
-                "time": candle["datetime"],
-                "open": float(candle["open"]),
-                "high": float(candle["high"]),
-                "low": float(candle["low"]),
-                "close": float(candle["close"])
-            })
-
-        df = pd.DataFrame(rows)
-
-        # OLDEST TO NEWEST
-        df = df[::-1].reset_index(drop=True)
+        df["close"] = df["close"].astype(float)
+        df["open"] = df["open"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
 
         return df
 
     except Exception as e:
-
-        print(Fore.RED + f"DATA ERROR: {e}")
-
+        print(Fore.RED + f"API ERROR: {e}")
         return None
 
-# ====================================
+# ==============================
 # SUPPLY & DEMAND
-# ====================================
+# ==============================
 
-def demand_zone(df):
+def supply_demand(df):
 
-    recent_low = df["low"].rolling(20).min().iloc[-1]
+    supply = df["high"].rolling(20).max().iloc[-1]
+    demand = df["low"].rolling(20).min().iloc[-1]
+
+    return supply, demand
+
+# ==============================
+# SMART MONEY STRUCTURE
+# ==============================
+
+def market_structure(df):
+
+    previous_high = df["high"].iloc[-5]
+    previous_low = df["low"].iloc[-5]
 
     current_price = df["close"].iloc[-1]
 
-    return current_price <= recent_low * 1.001
+    bos_buy = current_price > previous_high
+    bos_sell = current_price < previous_low
 
-def supply_zone(df):
+    return bos_buy, bos_sell
 
-    recent_high = df["high"].rolling(20).max().iloc[-1]
+# ==============================
+# MAIN ANALYSIS
+# ==============================
+
+def analyze_pair(pair):
+
+    print(Fore.CYAN + f"\nAnalyzing {pair}...")
+
+    # --------------------------
+    # SESSION FILTER
+    # --------------------------
+
+    hour = datetime.utcnow().hour
+
+    if hour < 7 or hour > 20:
+        print(Fore.YELLOW + "Outside London/New York session")
+        return
+
+    # --------------------------
+    # GET 5M DATA
+    # --------------------------
+
+    df = get_data(pair, "5min")
+
+    if df is None:
+        return
+
+    # --------------------------
+    # GET 1H DATA
+    # --------------------------
+
+    h1 = get_data(pair, "1h")
+
+    if h1 is None:
+        return
+
+    # --------------------------
+    # INDICATORS
+    # --------------------------
+
+    ema20 = EMAIndicator(df["close"], window=20).ema_indicator()
+    sma10 = SMAIndicator(df["close"], window=10).sma_indicator()
+
+    h1_ema50 = EMAIndicator(h1["close"], window=50).ema_indicator()
+
+    df["EMA20"] = ema20
+    df["SMA10"] = sma10
 
     current_price = df["close"].iloc[-1]
 
-    return current_price >= recent_high * 0.999
+    # --------------------------
+    # TREND FILTER
+    # --------------------------
 
-# ====================================
-# SMART MONEY CONCEPTS (SMC)
-# ====================================
+    h1_close = h1["close"].iloc[-1]
+    h1_ema = h1_ema50.iloc[-1]
 
-def bullish_bos(df):
+    trend_buy = h1_close > h1_ema
+    trend_sell = h1_close < h1_ema
 
-    recent_high = df["high"].iloc[-6:-1].max()
+    # --------------------------
+    # EMA/SMA CONFIRMATION
+    # --------------------------
 
-    current_close = df["close"].iloc[-1]
+    ema_buy = df["EMA20"].iloc[-1] > df["SMA10"].iloc[-1]
+    ema_sell = df["EMA20"].iloc[-1] < df["SMA10"].iloc[-1]
 
-    return current_close > recent_high
+    # --------------------------
+    # SUPPLY / DEMAND
+    # --------------------------
 
-def bearish_bos(df):
+    supply, demand = supply_demand(df)
 
-    recent_low = df["low"].iloc[-6:-1].min()
+    demand_buy = current_price <= demand * 1.002
+    supply_sell = current_price >= supply * 0.998
 
-    current_close = df["close"].iloc[-1]
+    # --------------------------
+    # CANDLE CONFIRMATION
+    # --------------------------
 
-    return current_close < recent_low
+    last_open = df["open"].iloc[-1]
+    last_close = df["close"].iloc[-1]
 
-# ====================================
-# MARKET TREND
-# ====================================
+    bullish_candle = last_close > last_open
+    bearish_candle = last_close < last_open
 
-def market_trend(ema20, sma10):
+    # --------------------------
+    # SMART MONEY BOS
+    # --------------------------
 
-    if ema20 > sma10:
-        return "BULLISH"
+    bos_buy, bos_sell = market_structure(df)
 
-    elif ema20 < sma10:
-        return "BEARISH"
+    # --------------------------
+    # CONFIDENCE SYSTEM
+    # --------------------------
+
+    buy_confidence = 0
+    sell_confidence = 0
+
+    if trend_buy:
+        buy_confidence += 20
+
+    if ema_buy:
+        buy_confidence += 20
+
+    if demand_buy:
+        buy_confidence += 20
+
+    if bullish_candle:
+        buy_confidence += 20
+
+    if bos_buy:
+        buy_confidence += 20
+
+    if trend_sell:
+        sell_confidence += 20
+
+    if ema_sell:
+        sell_confidence += 20
+
+    if supply_sell:
+        sell_confidence += 20
+
+    if bearish_candle:
+        sell_confidence += 20
+
+    if bos_sell:
+        sell_confidence += 20
+
+    # ==========================
+    # FINAL SIGNALS
+    # ==========================
+
+    current_time = datetime.now().strftime("%H:%M")
+
+    # BUY SIGNAL
+
+    if buy_confidence >= 80:
+
+        signal = (
+            f"🟢 BUY SIGNAL\n\n"
+            f"PAIR: {pair}\n"
+            f"TIMEFRAME: 5 MINUTES\n"
+            f"CONFIDENCE: {buy_confidence}%\n"
+            f"STRATEGY: SMC + EMA + DEMAND\n"
+            f"TIME: {current_time}"
+        )
+
+        print(Fore.GREEN + signal)
+
+        send_discord(signal)
+
+    # SELL SIGNAL
+
+    elif sell_confidence >= 80:
+
+        signal = (
+            f"🔴 SELL SIGNAL\n\n"
+            f"PAIR: {pair}\n"
+            f"TIMEFRAME: 5 MINUTES\n"
+            f"CONFIDENCE: {sell_confidence}%\n"
+            f"STRATEGY: SMC + EMA + SUPPLY\n"
+            f"TIME: {current_time}"
+        )
+
+        print(Fore.RED + signal)
+
+        send_discord(signal)
 
     else:
-        return "SIDEWAYS"
 
-# ====================================
-# AI CONFIDENCE
-# ====================================
+        print(Fore.YELLOW + f"No strong setup for {pair}")
 
-def confidence_score(
-    trend,
-    bos,
-    zone
-):
-
-    confidence = 50
-
-    if trend:
-        confidence += 20
-
-    if bos:
-        confidence += 20
-
-    if zone:
-        confidence += 15
-
-    return confidence
-
-# ====================================
-# ANALYSIS ENGINE
-# ====================================
-
-def analyze(pair_name, df):
-
-    ema20 = EMAIndicator(
-        close=df["close"],
-        window=20
-    ).ema_indicator()
-
-    sma10 = df["close"].rolling(10).mean()
-
-    current_price = df["close"].iloc[-1]
-
-    ema20_value = ema20.iloc[-1]
-    sma10_value = sma10.iloc[-1]
-
-    trend = market_trend(
-        ema20_value,
-        sma10_value
-    )
-
-    now = datetime.now()
-
-    print("\n===================================")
-    print(f"PAIR: {pair_name}")
-    print(f"TIME: {now.strftime('%H:%M:%S')}")
-    print(f"PRICE: {current_price}")
-    print(f"EMA20: {round(ema20_value, 5)}")
-    print(f"SMA10: {round(sma10_value, 5)}")
-    print(f"TREND: {trend}")
-    print("===================================")
-
-    # ====================================
-    # CALL CONDITIONS
-    # ====================================
-
-    bullish_zone = demand_zone(df)
-
-    bullish_structure = bullish_bos(df)
-
-    bullish_trend = (
-        trend == "BULLISH"
-        and current_price > ema20_value
-    )
-
-    bullish_confidence = confidence_score(
-        bullish_trend,
-        bullish_structure,
-        bullish_zone
-    )
-
-    if (
-        bullish_zone
-        and bullish_structure
-        and bullish_trend
-        and bullish_confidence >= MIN_CONFIDENCE
-    ):
-
-        signal_time = now
-
-        entry_time = signal_time + timedelta(minutes=1)
-
-        message = f"""
-🔥 HIGH ACCURACY CALL
-
-PAIR: {pair_name}
-
-📢 SIGNAL TIME:
-{signal_time.strftime('%H:%M:%S')}
-
-⏰ ENTER AT:
-{entry_time.strftime('%H:%M:%S')}
-
-⏱ TRADE TIME:
-{TRADE_DURATION} MINUTES
-
-🧠 AI CONFIDENCE:
-{bullish_confidence}%
-"""
-
-        print(Fore.GREEN + message)
-
-        send_discord(message)
-
-    # ====================================
-    # PUT CONDITIONS
-    # ====================================
-
-    bearish_zone = supply_zone(df)
-
-    bearish_structure = bearish_bos(df)
-
-    bearish_trend = (
-        trend == "BEARISH"
-        and current_price < ema20_value
-    )
-
-    bearish_confidence = confidence_score(
-        bearish_trend,
-        bearish_structure,
-        bearish_zone
-    )
-
-    if (
-        bearish_zone
-        and bearish_structure
-        and bearish_trend
-        and bearish_confidence >= MIN_CONFIDENCE
-    ):
-
-        signal_time = now
-
-        entry_time = signal_time + timedelta(minutes=1)
-
-        message = f"""
-🔥 HIGH ACCURACY PUT
-
-PAIR: {pair_name}
-
-📢 SIGNAL TIME:
-{signal_time.strftime('%H:%M:%S')}
-
-⏰ ENTER AT:
-{entry_time.strftime('%H:%M:%S')}
-
-⏱ TRADE TIME:
-{TRADE_DURATION} MINUTES
-
-🧠 AI CONFIDENCE:
-{bearish_confidence}%
-"""
-
-        print(Fore.RED + message)
-
-        send_discord(message)
-
-# ====================================
+# ==============================
 # MAIN LOOP
-# ====================================
+# ==============================
+
+print(Fore.CYAN + "=" * 40)
+print(Fore.CYAN + "POCKET OPTION AI SIGNAL BOT")
+print(Fore.CYAN + "STRICT HIGH ACCURACY VERSION")
+print(Fore.CYAN + "SMC + SUPPLY DEMAND + EMA")
+print(Fore.CYAN + "DISCORD ALERTS ENABLED")
+print(Fore.CYAN + "=" * 40)
 
 while True:
 
     try:
 
-        for pair, pair_name in PAIRS.items():
+        for pair in PAIRS:
 
-            from_symbol = pair[0]
-            to_symbol = pair[1]
+            analyze_pair(pair)
 
-            df = get_data(
-                from_symbol,
-                to_symbol
-            )
-
-            if df is not None:
-
-                analyze(
-                    pair_name,
-                    df
-                )
-
-            print("\nWaiting next pair...\n")
-
+            # WAIT BETWEEN PAIRS
             time.sleep(10)
+
+        print(Fore.CYAN + "\nWaiting for next 5 minute candle...\n")
+
+        # WAIT FOR NEXT 5M CANDLE
+        time.sleep(300)
 
     except Exception as e:
 
-        print(Fore.RED + f"ERROR: {e}")
+        print(Fore.RED + f"MAIN ERROR: {e}")
 
-    print(Fore.CYAN + "\nScanning market again...\n")
-
-    time.sleep(15)
+        time.sleep(60) 
