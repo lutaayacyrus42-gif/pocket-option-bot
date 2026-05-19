@@ -49,6 +49,8 @@ def send_discord(message):
 
 def get_data(symbol, interval="5min", outputsize=200):
 
+    pair = symbol.replace("/", "")
+
     url = (
         f"https://api.twelvedata.com/time_series?"
         f"symbol={symbol}"
@@ -268,10 +270,18 @@ def analyze_pair(pair):
         sell_confidence += 20
 
     # =====================================
-    # FINAL SIGNALS
+    # ENTRY + EXPIRY TIMES
     # =====================================
 
-    current_time = datetime.now().strftime("%H:%M")
+    entry_time = datetime.now().strftime("%H:%M:%S")
+
+    expiry_time = (
+        datetime.now() + pd.Timedelta(minutes=5)
+    ).strftime("%H:%M:%S")
+
+    # =====================================
+    # FINAL SIGNALS
+    # =====================================
 
     # BUY SIGNAL
 
@@ -281,10 +291,11 @@ def analyze_pair(pair):
 🟢 BUY SIGNAL
 
 PAIR: {pair}
+ENTRY TIME: {entry_time}
+EXPIRY TIME: {expiry_time}
 TIMEFRAME: 5 MINUTES
 CONFIDENCE: {buy_confidence}%
 STRATEGY: SMC + DEMAND + EMA
-TIME: {current_time}
 """
 
         print(Fore.GREEN + signal)
@@ -299,10 +310,11 @@ TIME: {current_time}
 🔴 SELL SIGNAL
 
 PAIR: {pair}
+ENTRY TIME: {entry_time}
+EXPIRY TIME: {expiry_time}
 TIMEFRAME: 5 MINUTES
 CONFIDENCE: {sell_confidence}%
 STRATEGY: SMC + SUPPLY + EMA
-TIME: {current_time}
 """
 
         print(Fore.RED + signal)
@@ -326,6 +338,8 @@ print(Fore.CYAN + "STRICT HIGH ACCURACY VERSION")
 print(Fore.CYAN + "SMC + SUPPLY DEMAND + EMA")
 
 print(Fore.CYAN + "DISCORD ALERTS ENABLED")
+
+print(Fore.CYAN + "ENTRY + EXPIRY TIMES ENABLED")
 
 print(Fore.CYAN + "LOW API USAGE MODE")
 
