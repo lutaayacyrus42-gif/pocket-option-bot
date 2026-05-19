@@ -12,9 +12,9 @@ init(autoreset=True)
 # CONFIG
 # ==============================
 
-API_KEY = "YOUR_FINNHUB_OR_TWELVEDATA_KEY"
+API_KEY = "6019661d14c94cc7a34c7ec523c89ce4"
 
-DISCORD_WEBHOOK = "YOUR_DISCORD_WEBHOOK"
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504374915657371759/Zsv5wpigIJcYQTYaSILn8LRcPaw3T14IFEXGeKsBHd_ZEFiZIUAus2bbFtarO1xN0TVN"
 
 PAIRS = [
     "EUR/USD",
